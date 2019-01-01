@@ -1,4 +1,14 @@
-# GRU4Rec
+# GRU4Rec in Keras
+
+This repository offers an implementation of the "Session-based Recommendations With Recurrent Neural Networks" paper using the Keras framework, tested with TensorFlow backend.
+
+Included are some tests that use the MovieLens 20M dataset. Our implementation presents comparable results to that of the original Theano implementation offered by the GRU4Rec authors for this dataset, and also one of the original ones: 2015 RecSys Challenge dataset (RSC15).
+
+Aditionally, a script can be found for determining a dataset's Dwell Time information, as seen on "Incorporating Dwell Time in Session-Based Recommendations with Recurrent Neural Networks" (http://ceur-ws.org/Vol-1922/paper11.pdf). Used with the RSC15 dataset, augmentation results can be reproduced, although we have not been able to replicate the final reported performance metrics.
+
+Future work contemplates incorporating dwell time in an online manner to the model, hoping to leverage said information in the learning process, instead of in a previous preprocessing stage.
+
+## Original GRU4Rec Readme
 
 Basic implementation of the algorithm of "Session-based Recommendations With Recurrent Neural Networks" (http://arxiv.org/abs/1511.06939). With the extensions introduced in "Recurrent Neural Networks with Top-k Gains for Session-based Recommendations" (http://arxiv.org/abs/1706.03847).
 
