@@ -6,6 +6,14 @@ Included are some tests that use the MovieLens 20M dataset. Our implementation p
 
 Aditionally, a script can be found for determining a dataset's Dwell Time information, as seen on "Incorporating Dwell Time in Session-Based Recommendations with Recurrent Neural Networks" (http://ceur-ws.org/Vol-1922/paper11.pdf). Used with the RSC15 dataset, augmentation results can be reproduced, although we have not been able to replicate the final reported performance metrics.
 
+Credit goes to yhs-968 for his parallel batcher, as shown in his pyGRU4REC repository.
+
+To run the RNN model, refer to the Scratch/M4-WithDwellTime.ipynb notebook.
+
+To run the Dwell Time augmentation process, refer to the DwellTimeTheano/DwellTimeTheano.ipynb notebook.
+
+A repository clean-up is on the shortlist, try to ignore the disorder in the meantime.
+
 Future work contemplates incorporating dwell time in an online manner to the model, hoping to leverage said information in the learning process, instead of in a previous preprocessing stage.
 
 ## Original GRU4Rec Readme
