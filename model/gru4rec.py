@@ -1,20 +1,7 @@
-import os
-import sys
-import math
-import psutil
-import sklearn
-import humanize
-import warnings
-import subprocess
+import argparse
 import numpy as np
 import pandas as pd
-import GPUtil as GPU
 from tqdm import tqdm
-import matplotlib.pyplot as plt
-from sklearn.metrics import recall_score
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
-from tensorflow.python.client import device_lib
 
 import tensorflow as tf
 config = tf.ConfigProto()
@@ -22,13 +9,11 @@ config.gpu_options.allow_growth = True
 
 import keras
 import keras.backend as K
+from keras.models import Model
 from keras.utils import to_categorical
-from keras.models import Model, Sequential
 from keras.callbacks import ModelCheckpoint
-from keras.initializers import glorot_uniform
-from keras.layers.core import Permute, Reshape, RepeatVector
-from keras.losses import cosine_proximity, categorical_crossentropy
-from keras.layers import Input, Dense, Dropout, CuDNNGRU, Embedding, concatenate, Lambda, multiply, merge, Flatten
+from keras.losses import categorical_crossentropy
+from keras.layers import Input, Dense, Dropout, CuDNNGRU, Embedding
 
 
 class SessionDataset:
@@ -51,8 +36,8 @@ class SessionDataset:
         self.add_item_indices(itemmap=itemmap)
         self.df.sort_values([session_key, time_key], inplace=True)
 
-        #Sort the df by time, and then by session ID. That is, df is sorted by session ID and
-        #clicks within a session are next to each other, where the clicks within a session are time-ordered.
+        # Sort the df by time, and then by session ID. That is, df is sorted by session ID and
+        # clicks within a session are next to each other, where the clicks within a session are time-ordered.
 
         self.click_offsets = self.get_click_offsets()
         self.session_idx_arr = self.order_session_idx()
@@ -107,8 +92,8 @@ class SessionDataLoader:
         """
         A class for creating session-parallel mini-batches.
         Args:
-             dataset (SessionDataset): the session dataset to generate the batches from
-             batch_size (int): size of the batch
+            dataset (SessionDataset): the session dataset to generate the batches from
+            batch_size (int): size of the batch
         """
         self.dataset = dataset
         self.batch_size = batch_size
@@ -122,7 +107,6 @@ class SessionDataLoader:
             masks: Numpy array indicating the positions of the sessions to be terminated
         """
 
-        # initializations
         df = self.dataset.df
         session_key='SessionId'
         item_key='ItemId'
@@ -146,9 +130,9 @@ class SessionDataLoader:
                 # Build inputs & targets
                 idx_input = idx_target
                 idx_target = df.item_idx.values[start + i + 1]
-                input = idx_input
+                inp = idx_input
                 target = idx_target
-                yield input, target, mask
+                yield inp, target, mask
                 
             # click indices where a particular session meets second-to-last element
             start = start + (minlen - 1)
@@ -166,21 +150,21 @@ class SessionDataLoader:
                 end[idx] = click_offsets[session_idx_arr[maxiter] + 1]
 
 
-def create_model():   
+def create_model(args):   
     emb_size = 50
     hidden_units = 100
     size = emb_size
 
-    inputs = Input(batch_shape=(batch_size, 1, n_items))
-    gru, gru_states = CuDNNGRU(hidden_units, stateful=True, return_state=True)(inputs)# drop1) #
+    inputs = Input(batch_shape=(args.batch_size, 1, args.train_n_items))
+    gru, gru_states = CuDNNGRU(hidden_units, stateful=True, return_state=True)(inputs)
     drop2 = Dropout(0.25)(gru)
-    predictions = Dense(n_items, activation='softmax')(drop2)
+    predictions = Dense(args.train_n_items, activation='softmax')(drop2)
     model = Model(input=inputs, output=[predictions])
     opt = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
     model.compile(loss=categorical_crossentropy, optimizer=opt)
     model.summary()
 
-    filepath='./DwellTimeModel_checkpoint.h5'
+    filepath='./model_checkpoint.h5'
     checkpoint = ModelCheckpoint(filepath, monitor='loss', verbose=2, save_best_only=True, mode='min')
     callbacks_list = []
     return model
@@ -190,92 +174,66 @@ def get_states(model):
     return [K.get_value(s) for s,_ in model.state_updates]
 
 
-def set_states(model, states):
-    for (d,_), s in zip(model.state_updates, states):
-        K.set_value(d, s)
+def get_metrics(model, args, train_generator_map, recall_k=20, mrr_k=20):
 
-
-def get_recall(model, train_generator_map, recall_k=20):
-
-    test_dataset = SessionDataset(test_data, itemmap=train_generator_map)
-    test_generator = SessionDataLoader(test_dataset, batch_size=batch_size)
+    test_dataset = SessionDataset(args.test_data, itemmap=train_generator_map)
+    test_generator = SessionDataLoader(test_dataset, batch_size=args.batch_size)
 
     n = 0
-    suma = 0
-    suma_baseline = 0
+    rec_sum = 0
+    mrr_sum = 0
 
-    for feat, label, mask in test_generator:
+    with tqdm(total=args.test_samples_qty) as pbar:
+        for feat, label, mask in test_generator:
 
-        input_oh = to_categorical(feat, num_classes=loader.n_items) 
-        input_oh = np.expand_dims(input_oh, axis=1)
-        target_oh = to_categorical(label, num_classes=loader.n_items)
-        pred = model.predict(input_oh, batch_size=batch_size)
+            target_oh = to_categorical(label, num_classes=args.train_n_items)
+            input_oh  = to_categorical(feat,  num_classes=args.train_n_items) 
+            input_oh = np.expand_dims(input_oh, axis=1)
+            
+            pred = model.predict(input_oh, batch_size=args.batch_size)
 
-        if n%100 == 0:
-            try:
-                print("{}:{}".format(n, suma/n))
-            except:
-                pass
+            for row_idx in range(feat.shape[0]):
+                pred_row = pred[row_idx] 
+                label_row = target_oh[row_idx]
 
-        for row_idx in range(feat.shape[0]):
-            pred_row = pred[row_idx] 
-            label_row = target_oh[row_idx]
+                rec_idx =  pred_row.argsort()[-recall_k:][::-1]
+                mrr_idx =  pred_row.argsort()[-mrr_k:][::-1]
+                tru_idx = label_row.argsort()[-1:][::-1]
 
-            idx1 = pred_row.argsort()[-recall_k:][::-1]
-            idx2 = label_row.argsort()[-1:][::-1]
+                n += 1
 
-            n += 1
-            if idx2[0] in idx1:
-                suma += 1
+                if tru_idx[0] in rec_idx:
+                    rec_sum += 1
 
-    print("Recall@{} epoch {}: {}".format(recall_k, epoch, suma/n))
+                if tru_idx[0] in mrr_idx:
+                    mrr_sum += 1/int((np.where(mrr_idx == tru_idx[0])[0]+1))
+            
+            pbar.set_description("Evaluating model")
+            pbar.update(test_generator.done_sessions_counter)
 
-
-def get_mrr(model, train_generator_map, mrr_k=20):
-
-    test_dataset = SessionDataset(test_data, itemmap = train_generator_map)
-    test_generator = SessionDataLoader(test_dataset, batch_size=batch_size)
-
-    n = 0
-    suma = 0
-    suma_baseline = 0
-
-    for feat, label, mask in test_generator:
-        input_oh = to_categorical(feat, num_classes=loader.n_items) 
-        input_oh = np.expand_dims(input_oh, axis=1)
-        target_oh = to_categorical(label, num_classes=loader.n_items)
-        pred = model.predict(input_oh, batch_size=batch_size)
-
-        if n%100 == 0:
-            try:
-                print("{}:{}".format(n, suma/n))
-            except:
-                pass
-
-        for row_idx in range(feat.shape[0]):
-            pred_row = pred[row_idx] 
-            label_row = target_oh[row_idx]
-
-            idx1 = pred_row.argsort()[-mrr_k:][::-1]
-            idx2 = label_row.argsort()[-1:][::-1]
-
-            n += 1
-            if idx2[0] in idx1:
-                suma += 1/int((np.where(idx1 == idx2[0])[0]+1))        
-
-    print("MRR@{} epoch {}: {}".format(mrr_k, epoch, suma/n))
+    recall = rec_sum/n
+    mrr = mrr_sum/n
+    return (recall, recall_k), (mrr, mrr_k)
 
 
-def train_model(model, save_weights = False, path_to_weights = False):
-    train_dataset = SessionDataset(train_data)
-
+def train_model(model, args, save_weights = False):
+    train_dataset = SessionDataset(args.train_data)
     model_to_train = model
+    batch_size = args.batch_size
 
-    with tqdm(total=train_samples_qty) as pbar:
-        for epoch in range(1, 10):
-            if path_to_weights:
-                loader = SessionDataLoader(train_dataset, batch_size=batch_size)
+    for epoch in range(1, 10):
+        with tqdm(total=args.train_samples_qty) as pbar:
+            loader = SessionDataLoader(train_dataset, batch_size=batch_size)
             for feat, target, mask in loader:
+                
+                real_mask = np.ones((batch_size, 1))
+                for elt in mask:
+                    real_mask[elt, :] = 0
+
+                hidden_states = get_states(model_to_train)[0]
+                hidden_states = np.multiply(real_mask, hidden_states)
+                hidden_states = np.array(hidden_states, dtype=np.float32)
+                model_to_train.layers[1].reset_states(hidden_states)
 
                 input_oh = to_categorical(feat, num_classes=loader.n_items) 
                 input_oh = np.expand_dims(input_oh, axis=1)
@@ -284,70 +242,47 @@ def train_model(model, save_weights = False, path_to_weights = False):
 
                 tr_loss = model_to_train.train_on_batch(input_oh, target_oh)
 
-                real_mask = np.ones((batch_size, 1))
-                for elt in mask:
-                    real_mask[elt, :] = 0
-
-                hidden_states = get_states(model_to_train)[0]
-
-                hidden_states = np.multiply(real_mask, hidden_states)
-                hidden_states = np.array(hidden_states, dtype=np.float32)
-                model_to_train.layers[1].reset_states(hidden_states)
-
                 pbar.set_description("Epoch {0}. Loss: {1:.5f}".format(epoch, tr_loss))
                 pbar.update(loader.done_sessions_counter)
+            
+        if save_weights:
+            print("Saving weights...")
+            model_to_train.save('./GRU4REC_{}.h5'.format(epoch))
+        
+        (rec, rec_k), (mrr, mrr_k) = get_metrics(model_to_train, args, train_dataset.itemmap)
 
-            # get metrics for epoch
-            get_recall(model_to_train, train_dataset.itemmap)
-            get_mrr(model_to_train, train_dataset.itemmap)
+        print("\t - Recall@{} epoch {}: {:5f}".format(rec_k, epoch, rec))
+        print("\t - MRR@{}    epoch {}: {:5f}".format(mrr_k, epoch, mrr))
+        print("\n")
 
-            # save model
-            if save_weights:
-                model_to_train.save('./DwellTimeEpoch{}.h5'.format(epoch))
-
-
+            
 if __name__ == '__main__':
-    PATH_TO_TRAIN = '../processedData/augmented.csv'
-    PATH_TO_DEV = '../processedData/rsc15_train_valid.txt'
-    PATH_TO_TEST = '../processedData/rsc15_test.txt'
-    train_data = pd.read_csv(PATH_TO_TRAIN, sep='\t', dtype={'ItemId':np.int64})
-    dev_data = pd.read_csv(PATH_TO_DEV, sep='\t', dtype={'ItemId':np.int64})
-    test_data = pd.read_csv(PATH_TO_TEST, sep='\t', dtype={'ItemId': np.int64})
+    parser = argparse.ArgumentParser(description='Keras GRU4REC: session-based recommendations')
+    parser.add_argument('--resume', type=str, help='stored model path to continue training')
+    parser.add_argument('--train-path', type=str, default='../../processedData/rsc15_train_tr.txt')
+    parser.add_argument('--dev-path', type=str, default='../../processedData/rsc15_train_valid.txt')
+    parser.add_argument('--test-path', type=str, default='../../processedData/rsc15_test.txt')
+    parser.add_argument('--batch-size', type=str, default=512)
+    args = parser.parse_args()
+
+    args.train_data = pd.read_csv(args.train_path, sep='\t', dtype={'ItemId': np.int64})
+    args.dev_data   = pd.read_csv(args.dev_path,   sep='\t', dtype={'ItemId': np.int64})
+    args.test_data  = pd.read_csv(args.test_path,  sep='\t', dtype={'ItemId': np.int64})
     
-    batch_size = 512
-    session_max_len = 100
-    embeddingp=False
+    args.train_n_items = len(args.train_data['ItemId'].unique()) + 1
 
-    n_items = len(train_data['ItemId'].unique())+1
-    print("Unique training items:", n_items)
-
-    dev_n_items = len(dev_data['ItemId'].unique())+1
-    print("Unique dev items:", dev_n_items)
-
-    test_n_items = len(test_data['ItemId'].unique())+1
-    print("Unique testing items:", test_n_items)
-
-    train_samples_qty = len(train_data['SessionId'].unique()) 
-    print("Training sessions:", train_samples_qty)
-
-    dev_samples_qty = len(dev_data['SessionId'].unique()) 
-    print("Dev sessions:",dev_samples_qty)
-
-    test_samples_qty = len(test_data['SessionId'].unique())
-    print("Testing sessions:", test_samples_qty)
+    args.train_samples_qty = len(args.train_data['SessionId'].unique()) + 1
+    args.test_samples_qty = len(args.test_data['SessionId'].unique()) + 1
     
-    train_fraction = 1 # (1 / fraction) most recent session quantity to consider
-    dev_fraction = 1
-
-    train_offset_step=train_samples_qty//batch_size
-    dev_offset_step=dev_samples_qty//batch_size
-    test_offset_step=test_samples_qty//batch_size
-    aux = [0]
-    aux.extend(list(train_data['ItemId'].unique()))
-    itemids = np.array(aux)
-    itemidmap = pd.Series(data=np.arange(n_items), index=itemids) 
-    
-    model = create_model()
-    
-    train_model(model)
+    if args.resume:
+        try:
+            model = keras.models.load_model(args.resume)
+            print("Model checkpoint '{}' loaded!".format(args.resume))
+        except OSError:
+            print("Model checkpoint could not be loaded. Training from scratch...")
+            model = create_model(args)
+    else:
+        model = create_model(args)
+            
+    train_model(model, args, save_weights=True)
 
