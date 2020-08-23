@@ -14,7 +14,7 @@ To train the RNN model from scratch:
 
 To resume training from a checkpoint, add ```--resume path/to/model_weights.h5``` to the previous command.
 
-To run the Dwell Time augmentation process: ```python preprocess/extractDwellTime.py```.
+To run the Dwell Time augmentation process: ```python preprocess/extractDwellTime.py --train-path path/to/train.csv --output-path path/to/augmented_train.csv```.
 
 Future work contemplates incorporating dwell time in an online manner to the model, hoping to leverage said information in the learning process, instead of in a previous preprocessing stage.
 
