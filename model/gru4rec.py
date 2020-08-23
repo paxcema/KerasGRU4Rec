@@ -3,17 +3,13 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-import tensorflow as tf
-config = tf.ConfigProto()
-config.gpu_options.allow_growth = True
-
 import keras
 import keras.backend as K
 from keras.models import Model
 from keras.utils import to_categorical
 from keras.callbacks import ModelCheckpoint
 from keras.losses import categorical_crossentropy
-from keras.layers import Input, Dense, Dropout, CuDNNGRU, Embedding
+from keras.layers import Input, Dense, Dropout, GRU
 
 
 class SessionDataset:
@@ -156,10 +152,10 @@ def create_model(args):
     size = emb_size
 
     inputs = Input(batch_shape=(args.batch_size, 1, args.train_n_items))
-    gru, gru_states = CuDNNGRU(hidden_units, stateful=True, return_state=True)(inputs)
+    gru, gru_states = GRU(hidden_units, stateful=True, return_state=True, name="GRU")(inputs)
     drop2 = Dropout(0.25)(gru)
     predictions = Dense(args.train_n_items, activation='softmax')(drop2)
-    model = Model(input=inputs, output=[predictions])
+    model = Model(inputs=inputs, outputs=[predictions])
     opt = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
     model.compile(loss=categorical_crossentropy, optimizer=opt)
     model.summary()
@@ -168,10 +164,6 @@ def create_model(args):
     checkpoint = ModelCheckpoint(filepath, monitor='loss', verbose=2, save_best_only=True, mode='min')
     callbacks_list = []
     return model
-
-
-def get_states(model):
-    return [K.get_value(s) for s,_ in model.state_updates]
 
 
 def get_metrics(model, args, train_generator_map, recall_k=20, mrr_k=20):
@@ -225,17 +217,14 @@ def train_model(model, args, save_weights = False):
         with tqdm(total=args.train_samples_qty) as pbar:
             loader = SessionDataLoader(train_dataset, batch_size=batch_size)
             for feat, target, mask in loader:
-                
-                real_mask = np.ones((batch_size, 1))
+
+                gru_layer = model_to_train.get_layer(name="GRU")
+                hidden_states = gru_layer.states[0].numpy()
                 for elt in mask:
-                    real_mask[elt, :] = 0
+                    hidden_states[elt, :] = 0
+                gru_layer.reset_states(states=hidden_states)
 
-                hidden_states = get_states(model_to_train)[0]
-                hidden_states = np.multiply(real_mask, hidden_states)
-                hidden_states = np.array(hidden_states, dtype=np.float32)
-                model_to_train.layers[1].reset_states(hidden_states)
-
-                input_oh = to_categorical(feat, num_classes=loader.n_items) 
+                input_oh = to_categorical(feat, num_classes=loader.n_items)
                 input_oh = np.expand_dims(input_oh, axis=1)
 
                 target_oh = to_categorical(target, num_classes=loader.n_items)
@@ -244,18 +233,18 @@ def train_model(model, args, save_weights = False):
 
                 pbar.set_description("Epoch {0}. Loss: {1:.5f}".format(epoch, tr_loss))
                 pbar.update(loader.done_sessions_counter)
-            
+
         if save_weights:
             print("Saving weights...")
             model_to_train.save('./GRU4REC_{}.h5'.format(epoch))
-        
+
         (rec, rec_k), (mrr, mrr_k) = get_metrics(model_to_train, args, train_dataset.itemmap)
 
         print("\t - Recall@{} epoch {}: {:5f}".format(rec_k, epoch, rec))
         print("\t - MRR@{}    epoch {}: {:5f}".format(mrr_k, epoch, mrr))
         print("\n")
 
-            
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Keras GRU4REC: session-based recommendations')
     parser.add_argument('--resume', type=str, help='stored model path to continue training')
@@ -268,12 +257,12 @@ if __name__ == '__main__':
     args.train_data = pd.read_csv(args.train_path, sep='\t', dtype={'ItemId': np.int64})
     args.dev_data   = pd.read_csv(args.dev_path,   sep='\t', dtype={'ItemId': np.int64})
     args.test_data  = pd.read_csv(args.test_path,  sep='\t', dtype={'ItemId': np.int64})
-    
+
     args.train_n_items = len(args.train_data['ItemId'].unique()) + 1
 
     args.train_samples_qty = len(args.train_data['SessionId'].unique()) + 1
     args.test_samples_qty = len(args.test_data['SessionId'].unique()) + 1
-    
+
     if args.resume:
         try:
             model = keras.models.load_model(args.resume)
@@ -283,6 +272,6 @@ if __name__ == '__main__':
             model = create_model(args)
     else:
         model = create_model(args)
-            
+
     train_model(model, args, save_weights=True)
 
