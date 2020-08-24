@@ -10,19 +10,22 @@ Credit goes to yhs-968 for his parallel-batch data loader, as shown in his pyGRU
 
 To train the RNN model from scratch: 
 
-```python model/gru4rec.py --train-path path/to/train.csv --dev-path path/to/validation.csv --test-path path/to/test.csv```.
+```python model/gru4rec.py --train-path path/to/train.csv --dev-path path/to/validation.csv --test-path path/to/test.csv --epoch n_epochs```.
 
 To resume training from a checkpoint, add ```--resume path/to/model_weights.h5``` to the previous command.
 
-To run the Dwell Time augmentation process: ```python preprocess/extractDwellTime.py```.
+To run the Dwell Time augmentation process: ```python preprocess/extractDwellTime.py --train-path path/to/train.csv --output-path path/to/augmented_train.csv```.
 
 Future work contemplates incorporating dwell time in an online manner to the model, hoping to leverage said information in the learning process, instead of in a previous preprocessing stage.
+
+[23/8/2020] Updated backend to TensorFlow 2.3.0
 
 ## Requirements
 
 The code has been tested with Python 3.6.8, using the following versions of the required dependencies:
-- numpy == 1.16.3
-- pandas == 0.24.2
-- tqdm == 4.32.1
-- tensorflow == 1.11.0rc1
-- keras == 2.2.4
+- numpy == 1.18.5
+- pandas == 1.0.5
+- tqdm == 4.41.1
+- tensorflow == 2.3.0
+- keras == 2.4.3
+- matplotlib == 3.3.1
