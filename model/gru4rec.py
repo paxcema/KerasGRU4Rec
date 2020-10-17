@@ -285,8 +285,6 @@ if __name__ == '__main__':
         model = create_model(args)
 
     if args.eval_only:
-        print(model.summary())
-        model.run_eagerly = True
         train_dataset = SessionDataset(args.train_data)
         (rec, rec_k), (mrr, mrr_k) = get_metrics(model, args, train_dataset.itemmap)
         print("\t - Recall@{} epoch {}: {:5f}".format(rec_k, -1, rec))
