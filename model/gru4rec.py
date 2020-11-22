@@ -259,7 +259,7 @@ if __name__ == '__main__':
     parser.add_argument('--eval-only', type=bool, default=False)
     parser.add_argument('--dev-path', type=str, default='../../processedData/rsc15_train_valid.txt')
     parser.add_argument('--test-path', type=str, default='../../processedData/rsc15_test.txt')
-    parser.add_argument('--batch-size', type=str, default=512)
+    parser.add_argument('--batch-size', type=int, default=512)
     parser.add_argument('--eval-all-epochs', type=bool, default=False)
     parser.add_argument('--save-weights', type=bool, default=False)
     parser.add_argument('--epochs', type=int, default=10)
