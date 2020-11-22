@@ -152,7 +152,8 @@ def create_model(args):
     size = emb_size
 
     inputs = Input(batch_shape=(args.batch_size, 1, args.train_n_items))
-    gru, gru_states = GRU(hidden_units, stateful=True, return_state=True, name="GRU")(inputs)
+    dr = Dense(1000)(inputs)
+    gru, gru_states = GRU(hidden_units, stateful=True, return_state=True, name="GRU")(dr)
     drop2 = Dropout(0.25)(gru)
     predictions = Dense(args.train_n_items, activation='softmax')(drop2)
     model = Model(inputs=inputs, outputs=[predictions])
