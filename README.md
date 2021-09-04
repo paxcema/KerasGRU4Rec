@@ -20,12 +20,14 @@ Future work contemplates incorporating dwell time in an online manner to the mod
 
 [23/8/2020] Updated backend to TensorFlow 2.3.0
 
+[04/09/2021] Updated backend to TensorFlow 2.6.0
+
 ## Requirements
 
 The code has been tested with Python 3.6.8, using the following versions of the required dependencies:
 - numpy == 1.18.5
 - pandas == 1.0.5
 - tqdm == 4.41.1
-- tensorflow == 2.3.0
+- tensorflow == 2.6.0
 - keras == 2.4.3
 - matplotlib == 3.3.1
