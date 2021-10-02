@@ -5,15 +5,16 @@ from tqdm import tqdm
 
 import keras
 import keras.backend as K
+import tensorflow as tf
 from keras.models import Model
-from keras.utils import to_categorical
+from tensorflow.keras.utils import to_categorical
 from keras.callbacks import ModelCheckpoint
 from keras.losses import categorical_crossentropy
 from keras.layers import Input, Dense, Dropout, GRU
 
 
 class SessionDataset:
-    """Credit to yhs-968/pyGRU4REC."""    
+    """Credit to yhs-968/pyGRU4REC."""
     def __init__(self, data, sep='\t', session_key='SessionId', item_key='ItemId', time_key='Time', n_samples=-1, itemmap=None, time_sort=False):
         """
         Args:
@@ -37,7 +38,7 @@ class SessionDataset:
 
         self.click_offsets = self.get_click_offsets()
         self.session_idx_arr = self.order_session_idx()
-        
+
     def get_click_offsets(self):
         """
         Return the offsets of the beginning clicks of each session IDs,
@@ -60,9 +61,9 @@ class SessionDataset:
             session_idx_arr = np.arange(self.df[self.session_key].nunique())
 
         return session_idx_arr
-    
+
     def add_item_indices(self, itemmap=None):
-        """ 
+        """
         Add item index column named "item_idx" to the df
         Args:
             itemmap (pd.DataFrame): mapping between the item Ids and indices
@@ -73,17 +74,17 @@ class SessionDataset:
                                  index=item_ids)
             itemmap = pd.DataFrame({self.item_key:item_ids,
                                    'item_idx':item2idx[item_ids].values})
-        
+
         self.itemmap = itemmap
         self.df = pd.merge(self.df, self.itemmap, on=self.item_key, how='inner')
-        
-    @property    
+
+    @property
     def items(self):
         return self.itemmap.ItemId.unique()
-        
+
 
 class SessionDataLoader:
-    """Credit to yhs-968/pyGRU4REC."""    
+    """Credit to yhs-968/pyGRU4REC."""
     def __init__(self, dataset, batch_size=50):
         """
         A class for creating session-parallel mini-batches.
@@ -94,7 +95,7 @@ class SessionDataLoader:
         self.dataset = dataset
         self.batch_size = batch_size
         self.done_sessions_counter = 0
-        
+
     def __iter__(self):
         """ Returns the iterator for producing session-parallel training mini-batches.
         Yields:
@@ -116,7 +117,7 @@ class SessionDataLoader:
         start = click_offsets[session_idx_arr[iters]]
         end = click_offsets[session_idx_arr[iters] + 1]
         mask = [] # indicator for the sessions to be terminated
-        finished = False        
+        finished = False
 
         while not finished:
             minlen = (end - start).min()
@@ -129,7 +130,7 @@ class SessionDataLoader:
                 inp = idx_input
                 target = idx_target
                 yield inp, target, mask
-                
+
             # click indices where a particular session meets second-to-last element
             start = start + (minlen - 1)
             # see if how many sessions should terminate
@@ -146,7 +147,7 @@ class SessionDataLoader:
                 end[idx] = click_offsets[session_idx_arr[maxiter] + 1]
 
 
-def create_model(args):   
+def create_model(args):
     emb_size = 50
     hidden_units = 100
     size = emb_size
@@ -156,7 +157,7 @@ def create_model(args):
     drop2 = Dropout(0.25)(gru)
     predictions = Dense(args.train_n_items, activation='softmax')(drop2)
     model = Model(inputs=inputs, outputs=[predictions])
-    opt = keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
+    opt = tf.keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
     model.compile(loss=categorical_crossentropy, optimizer=opt)
     model.summary()
 
