@@ -1,6 +1,6 @@
 numpy==1.22.0
 pandas==1.0.5
 tqdm==4.41.1
-tensorflow==2.7.2
+tensorflow==2.9.3
 keras==2.4.3
 matplotlib
